@@ -213,6 +213,10 @@ def process_images_column(output_file_path: str) -> list[str]:
 
 async def main(pages: int, file_format: str) -> None:
     ic(pages, file_format)
+
+    if not os.path.exists(DOWNLOADS_DIR):
+        os.makedirs(DOWNLOADS_DIR)
+
     output_file: str = f"{OUTPUT_FILE_PATH}.{file_format}"
     driver: WebDriver = initialize_driver()
 
