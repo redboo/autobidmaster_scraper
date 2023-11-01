@@ -1,13 +1,15 @@
-import requests
+import argparse
 import ast
+import asyncio
 import json
 import os
 import random
 from platform import system
 from time import sleep
 
-import click
+import aiohttp
 import pandas as pd
+import requests
 from dotenv import load_dotenv
 from icecream import ic
 from selenium import webdriver
@@ -17,8 +19,8 @@ from selenium.webdriver.common.keys import Keys
 
 load_dotenv()
 
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
+EMAIL: str | None = os.getenv("EMAIL")
+PASSWORD: str | None = os.getenv("PASSWORD")
 
 OUTPUT_FILE_PATH = "downloads/data.csv"
 BASE_URL = "https://www.autobidmaster.com/ru/"
@@ -104,35 +106,52 @@ def process_dataframe(dataframe):
     return dataframe
 
 
-def download_images(images, output_folder="downloads/images"):
+async def download_image(session, image_url, file_path):
+    async with session.get(image_url) as response:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await response.content.read(8192)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+
+async def download_images(images, output_folder="downloads/images"):
+    ic()
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    for image_url in images:
-        try:
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for image_url in images:
             file_name = os.path.join(output_folder, f"{image_url.split('/')[-1]}")
             if not os.path.exists(file_name):
-                response = requests.get(image_url, stream=True)
-                with open(file_name, "wb") as file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        file.write(chunk)
+                tasks.append(download_image(session, image_url, file_name))
             else:
                 ic(f"Файл {file_name} уже существует. Пропускаем загрузку.")
-        except Exception as e:
-            ic(f"Ошибка при загрузке изображения {image_url}: {e}")
+
+        await asyncio.gather(*tasks)
 
 
-def process_images_column(df, output_file_path):
+def process_images(images) -> list[str]:
+    def get_image_url(item):
+        return item["hdr"] if item["hdr"] is not None else item["full"]
+
+    return [get_image_url(item) for item in ast.literal_eval(images)]
+
+
+def process_images_column(output_file_path) -> list[str]:
+    ic()
     df = pd.read_csv(output_file_path)
-    df["images"] = df["images"].apply(lambda x: [item["hdr"] for item in ast.literal_eval(x)])
-    save_to_csv(df, output_file_path)
-    for image_list in df["images"]:
-        download_images(image_list)
+    df["images"] = df["images"].apply(process_images)
+    all_images: list[str] = [image for sublist in df["images"] for image in sublist]
+    df.to_csv(output_file_path, index=False, encoding="utf-8")
+
+    return all_images
 
 
-@click.command()
-@click.argument("pages", type=int, default=1, required=False)
-def main(pages: int = 1):
+async def main(pages: int) -> None:
+    ic(pages)
     driver = initialize_driver()
 
     try:
@@ -168,7 +187,8 @@ def main(pages: int = 1):
         df = fetch_data(driver, filter_params, pages)
         df = process_dataframe(df)
         save_to_csv(df, OUTPUT_FILE_PATH)
-        process_images_column(df, OUTPUT_FILE_PATH)
+        image_list: list[str] = process_images_column(OUTPUT_FILE_PATH)
+        await download_images(image_list)
 
     except Exception as e:
         print(f"Произошла ошибка: {e}")
@@ -179,4 +199,7 @@ def main(pages: int = 1):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Скраппинг данных с Autobidmaster")
+    parser.add_argument("pages", type=int, nargs="?", default=1, help="Количество страниц для обработки")
+    args = parser.parse_args()
+    asyncio.run(main(args.pages))
