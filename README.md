@@ -69,7 +69,9 @@
 
 ## Использование
 
-1. Убедитесь, что у вас установлены Chrome и ChromeDriver. [Инструкция по установке ChromeDriver](https://sites.google.com/chromium.org/driver/getting-started)
+1. Убедитесь, что у вас установлены браузер Google Chrome и ChromeDriver.
+
+   * Скачайте ChromeDriver с [официального сайта](https://sites.google.com/chromium.org/driver/downloads) и распакуйте архив в папку `driver` внутри проекта.
 
 2. Создайте файл `.env` на основе [`default.env`](default.env) и заполните свои учетные данные авторизации на сайте:
 
