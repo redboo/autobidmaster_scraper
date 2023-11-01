@@ -10,6 +10,7 @@ from time import sleep
 
 import aiohttp
 import pandas as pd
+from aiohttp import ClientSession
 from dotenv import load_dotenv
 from icecream import ic
 from pandas import DataFrame
@@ -64,7 +65,7 @@ def save_to_file(dataframe: DataFrame, output_file_path: str) -> None:
         raise
 
 
-def fetch_data(driver, filter_params, pages: int) -> DataFrame:
+def fetch_data(driver: WebDriver, filter_params: dict[str, str | int], pages: int) -> DataFrame:
     ic()
     page = 1
     all_data = []
@@ -135,17 +136,17 @@ def process_dataframe(df: DataFrame) -> DataFrame:
     return df
 
 
-async def download_image(session, image_url, file_path) -> None:
+async def download_image(session: ClientSession, image_url: str, file_path: str) -> None:
     async with session.get(image_url) as response:
         with open(file_path, "wb") as f:
             while True:
-                chunk = await response.content.read(8192)
+                chunk: bytes = await response.content.read(8192)
                 if not chunk:
                     break
                 f.write(chunk)
 
 
-async def create_zip_archive(downloaded_files, output_folder) -> str:
+async def create_zip_archive(downloaded_files: list[str], output_folder: str) -> str:
     ic()
     zip_file_path: str = os.path.join(DOWNLOADS_DIR, "images.zip")
 
@@ -159,12 +160,12 @@ async def create_zip_archive(downloaded_files, output_folder) -> str:
     return os.path.abspath(zip_file_path)
 
 
-async def download_images(images, output_folder=IMAGES_DIR) -> None:
+async def download_images(images: list[str], output_folder: str = IMAGES_DIR) -> None:
     ic()
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    downloaded_files = []
+    downloaded_files: list[str] = []
 
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -181,14 +182,14 @@ async def download_images(images, output_folder=IMAGES_DIR) -> None:
     print(f"{len(downloaded_files)} изображений добавлены в архив: {output_archive}")
 
 
-def process_images(images) -> list[str]:
-    def get_image_url(item):
+def process_images(images: str) -> list[str]:
+    def get_image_url(item) -> str:
         return item["hdr"] if item["hdr"] is not None else item["full"]
 
-    return [get_image_url(item) for item in ast.literal_eval(images.replace(" ", ""))]
+    return [get_image_url(item) for item in ast.literal_eval(images)]
 
 
-def process_images_column(output_file_path) -> list[str]:
+def process_images_column(output_file_path: str) -> list[str]:
     ic()
     if output_file_path.lower().endswith(".csv"):
         df: DataFrame = pd.read_csv(output_file_path)
