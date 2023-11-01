@@ -1,21 +1,23 @@
 import argparse
 import ast
 import asyncio
-import json
 import os
 import random
+from argparse import Namespace
 from platform import system
 from time import sleep
 
 import aiohttp
 import pandas as pd
-import requests
 from dotenv import load_dotenv
 from icecream import ic
+from pandas import DataFrame
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.remote.webelement import WebElement
 
 load_dotenv()
 
@@ -26,31 +28,35 @@ OUTPUT_FILE_PATH = "downloads/data.csv"
 BASE_URL = "https://www.autobidmaster.com/ru/"
 
 
-def initialize_driver():
+def initialize_driver() -> WebDriver:
     options = webdriver.ChromeOptions()
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    current_directory = os.getcwd()
-    driver_directory = os.path.join(current_directory, "driver")
-    chromedriver_filename = "chromedriver.exe" if system() == "Windows" else "chromedriver"
-    chromedriver_path = os.path.join(driver_directory, chromedriver_filename)
+    current_directory: str = os.getcwd()
+    driver_directory: str = os.path.join(current_directory, "driver")
+    chromedriver_filename: str = "chromedriver.exe" if system() == "Windows" else "chromedriver"
+    chromedriver_path: str = os.path.join(driver_directory, chromedriver_filename)
 
     service = ChromeService(executable_path=chromedriver_path)
     return webdriver.Chrome(service=service, options=options)
 
 
-def save_to_csv(dataframe, output_file_path):
+def save_to_csv(dataframe, output_file_path) -> None:
     dataframe.to_csv(output_file_path, index=False, encoding="utf-8")
 
 
-def fetch_data(driver, filter_params, pages: int):
+def fetch_data(driver, filter_params, pages: int) -> DataFrame:
     page = 1
     all_data = []
 
     while page < pages + 1:
-        data_search_url = f"{BASE_URL}data/v2/inventory/search?custom_search=quickpick-runs-and-drives%2Fyear-{filter_params['year_range']}%2F&size={filter_params['page_size']}&page={page}&sort={filter_params['sort_by']}&order={filter_params['sort_order']}"
+        data_search_url: str = (
+            f"{BASE_URL}data/v2/inventory/search?custom_search=quickpick-runs-and-drives%2F"
+            f"year-{filter_params['year_range']}%2F&size={filter_params['page_size']}"
+            f"&page={page}&sort={filter_params['sort_by']}&order={filter_params['sort_order']}"
+        )
 
         driver.get(data_search_url)
         json_data = driver.execute_script("return JSON.parse(document.body.innerText);")
@@ -67,8 +73,8 @@ def fetch_data(driver, filter_params, pages: int):
     return pd.DataFrame(all_data)
 
 
-def process_dataframe(dataframe):
-    columns_to_keep = [
+def process_dataframe(df: DataFrame) -> DataFrame:
+    columns_to_keep: list[str] = [
         "vehicleCategory",
         "year",
         "make",
@@ -98,15 +104,15 @@ def process_dataframe(dataframe):
     ]
 
     try:
-        dataframe = dataframe[columns_to_keep]
+        df = df[columns_to_keep]
     except Exception as e:
         print(f"Произошла ошибка: {e}")
-        return None
+        raise
 
-    return dataframe
+    return df
 
 
-async def download_image(session, image_url, file_path):
+async def download_image(session, image_url, file_path) -> None:
     async with session.get(image_url) as response:
         with open(file_path, "wb") as f:
             while True:
@@ -116,7 +122,7 @@ async def download_image(session, image_url, file_path):
                 f.write(chunk)
 
 
-async def download_images(images, output_folder="downloads/images"):
+async def download_images(images, output_folder="downloads/images") -> None:
     ic()
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -124,7 +130,7 @@ async def download_images(images, output_folder="downloads/images"):
     async with aiohttp.ClientSession() as session:
         tasks = []
         for image_url in images:
-            file_name = os.path.join(output_folder, f"{image_url.split('/')[-1]}")
+            file_name: str = os.path.join(output_folder, f"{image_url.split('/')[-1]}")
             if not os.path.exists(file_name):
                 tasks.append(download_image(session, image_url, file_name))
             else:
@@ -142,7 +148,7 @@ def process_images(images) -> list[str]:
 
 def process_images_column(output_file_path) -> list[str]:
     ic()
-    df = pd.read_csv(output_file_path)
+    df: DataFrame = pd.read_csv(output_file_path)
     df["images"] = df["images"].apply(process_images)
     all_images: list[str] = [image for sublist in df["images"] for image in sublist]
     df.to_csv(output_file_path, index=False, encoding="utf-8")
@@ -152,39 +158,35 @@ def process_images_column(output_file_path) -> list[str]:
 
 async def main(pages: int) -> None:
     ic(pages)
-    driver = initialize_driver()
+    driver: WebDriver = initialize_driver()
 
     try:
-        driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {
-                "source": """
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-            """
-            },
-        )
+        script = """
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+            delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        """
+        driver.execute_script(script)
 
         driver.minimize_window()
         driver.get(f"{BASE_URL}login")
 
-        email_field = driver.find_element(By.ID, "email")
+        email_field: WebElement = driver.find_element(By.ID, "email")
         email_field.send_keys(EMAIL)
 
-        password_field = driver.find_element(By.ID, "password")
+        password_field: WebElement = driver.find_element(By.ID, "password")
         password_field.send_keys(PASSWORD)
         password_field.send_keys(Keys.RETURN)
         sleep(2)
 
-        filter_params = {
+        filter_params: dict[str, str | int] = {
             "year_range": "2021-2024",
             "page_size": 100,
             "sort_by": "sale_date",
             "sort_order": "asc",
         }
 
-        df = fetch_data(driver, filter_params, pages)
+        df: DataFrame = fetch_data(driver, filter_params, pages)
         df = process_dataframe(df)
         save_to_csv(df, OUTPUT_FILE_PATH)
         image_list: list[str] = process_images_column(OUTPUT_FILE_PATH)
@@ -201,5 +203,5 @@ async def main(pages: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Скраппинг данных с Autobidmaster")
     parser.add_argument("pages", type=int, nargs="?", default=1, help="Количество страниц для обработки")
-    args = parser.parse_args()
+    args: Namespace = parser.parse_args()
     asyncio.run(main(args.pages))
