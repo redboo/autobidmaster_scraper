@@ -24,7 +24,10 @@ load_dotenv()
 EMAIL: str | None = os.getenv("EMAIL")
 PASSWORD: str | None = os.getenv("PASSWORD")
 
-OUTPUT_FILE_PATH = "downloads/data.csv"
+DOWNLOADS_DIR = "downloads"
+OUTPUT_FILE_PATH: str = os.path.join(DOWNLOADS_DIR, "data")
+IMAGES_DIR: str = os.path.join(DOWNLOADS_DIR, "images")
+
 BASE_URL = "https://www.autobidmaster.com/ru/"
 
 
@@ -34,8 +37,7 @@ def initialize_driver() -> WebDriver:
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    current_directory: str = os.getcwd()
-    driver_directory: str = os.path.join(current_directory, "driver")
+    driver_directory: str = os.path.join(os.getcwd(), "driver")
     chromedriver_filename: str = "chromedriver.exe" if system() == "Windows" else "chromedriver"
     chromedriver_path: str = os.path.join(driver_directory, chromedriver_filename)
 
@@ -43,8 +45,16 @@ def initialize_driver() -> WebDriver:
     return webdriver.Chrome(service=service, options=options)
 
 
-def save_to_csv(dataframe, output_file_path) -> None:
-    dataframe.to_csv(output_file_path, index=False, encoding="utf-8")
+def save_to_file(dataframe: DataFrame, output_file_path: str) -> None:
+    extension: str = output_file_path.split(".")[-1].lower()
+
+    if extension == "csv":
+        dataframe.to_csv(output_file_path, index=False, encoding="utf-8")
+    elif extension.lower() in {"excel", "xls", "xlsx"}:
+        dataframe.to_excel(output_file_path, index=False)
+    else:
+        print(f"Неподдерживаемый формат файла: {extension}")
+        raise
 
 
 def fetch_data(driver, filter_params, pages: int) -> DataFrame:
@@ -122,7 +132,7 @@ async def download_image(session, image_url, file_path) -> None:
                 f.write(chunk)
 
 
-async def download_images(images, output_folder="downloads/images") -> None:
+async def download_images(images, output_folder=IMAGES_DIR) -> None:
     ic()
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -133,8 +143,6 @@ async def download_images(images, output_folder="downloads/images") -> None:
             file_name: str = os.path.join(output_folder, f"{image_url.split('/')[-1]}")
             if not os.path.exists(file_name):
                 tasks.append(download_image(session, image_url, file_name))
-            else:
-                ic(f"Файл {file_name} уже существует. Пропускаем загрузку.")
 
         await asyncio.gather(*tasks)
 
@@ -148,16 +156,30 @@ def process_images(images) -> list[str]:
 
 def process_images_column(output_file_path) -> list[str]:
     ic()
-    df: DataFrame = pd.read_csv(output_file_path)
+    if output_file_path.lower().endswith(".csv"):
+        df: DataFrame = pd.read_csv(output_file_path)
+    elif output_file_path.lower().endswith(".xlsx") or output_file_path.lower().endswith(".xls"):
+        df: DataFrame = pd.read_excel(output_file_path)
+    else:
+        print(f"Неподдерживаемый формат файла: {output_file_path}")
+        raise
+
     df["images"] = df["images"].apply(process_images)
     all_images: list[str] = [image for sublist in df["images"] for image in sublist]
-    df.to_csv(output_file_path, index=False, encoding="utf-8")
+
+    path_to_images = "images/"
+    df["images"] = df["images"].apply(
+        lambda images: [f"{path_to_images}{os.path.basename(image_url)}" for image_url in images]
+    )
+
+    save_to_file(df, output_file_path)
 
     return all_images
 
 
-async def main(pages: int) -> None:
+async def main(pages: int, file_format: str) -> None:
     ic(pages)
+    output_file: str = f"{OUTPUT_FILE_PATH}.{file_format}"
     driver: WebDriver = initialize_driver()
 
     try:
@@ -188,8 +210,8 @@ async def main(pages: int) -> None:
 
         df: DataFrame = fetch_data(driver, filter_params, pages)
         df = process_dataframe(df)
-        save_to_csv(df, OUTPUT_FILE_PATH)
-        image_list: list[str] = process_images_column(OUTPUT_FILE_PATH)
+        save_to_file(df, output_file)
+        image_list: list[str] = process_images_column(output_file)
         await download_images(image_list)
 
     except Exception as e:
@@ -203,5 +225,12 @@ async def main(pages: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Скраппинг данных с Autobidmaster")
     parser.add_argument("pages", type=int, nargs="?", default=1, help="Количество страниц для обработки")
+    parser.add_argument(
+        "--ext",
+        type=str,
+        choices=["csv", "excel", "xls", "xlsx"],
+        default="xlsx",
+        help="Расширение сохраняемого файла (по умолчанию: xlsx)",
+    )
     args: Namespace = parser.parse_args()
-    asyncio.run(main(args.pages))
+    asyncio.run(main(args.pages, args.ext))
