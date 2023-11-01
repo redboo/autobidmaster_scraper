@@ -69,7 +69,7 @@
 
 ## Использование
 
-1. Убедитесь, что у вас установлены браузер Google Chrome и ChromeDriver.
+1. Убедитесь, что у вас установлены браузер [Google Chrome](https://www.google.com/intl/ru_ru/chrome/) и [ChromeDriver](https://sites.google.com/chromium.org/driver/getting-started).
 
    * Скачайте ChromeDriver с [официального сайта](https://sites.google.com/chromium.org/driver/downloads) и распакуйте архив в папку `driver` внутри проекта.
 
