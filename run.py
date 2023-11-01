@@ -3,6 +3,7 @@ import ast
 import asyncio
 import os
 import random
+import zipfile
 from argparse import Namespace
 from platform import system
 from time import sleep
@@ -18,6 +19,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
+from tqdm import tqdm
+
+ic.disable()
 
 load_dotenv()
 
@@ -29,9 +33,11 @@ OUTPUT_FILE_PATH: str = os.path.join(DOWNLOADS_DIR, "data")
 IMAGES_DIR: str = os.path.join(DOWNLOADS_DIR, "images")
 
 BASE_URL = "https://www.autobidmaster.com/ru/"
+PATH_TO_IMAGES = "images"
 
 
 def initialize_driver() -> WebDriver:
+    ic()
     options = webdriver.ChromeOptions()
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -46,6 +52,7 @@ def initialize_driver() -> WebDriver:
 
 
 def save_to_file(dataframe: DataFrame, output_file_path: str) -> None:
+    ic()
     extension: str = output_file_path.split(".")[-1].lower()
 
     if extension == "csv":
@@ -58,9 +65,11 @@ def save_to_file(dataframe: DataFrame, output_file_path: str) -> None:
 
 
 def fetch_data(driver, filter_params, pages: int) -> DataFrame:
+    ic()
     page = 1
     all_data = []
 
+    progress_bar = tqdm(total=pages, desc="Скачивание страниц с данными", unit="page")
     while page < pages + 1:
         data_search_url: str = (
             f"{BASE_URL}data/v2/inventory/search?custom_search=quickpick-runs-and-drives%2F"
@@ -78,12 +87,16 @@ def fetch_data(driver, filter_params, pages: int) -> DataFrame:
         if page * filter_params["page_size"] > total_cars:
             break
 
+        progress_bar.update(1)
+
         sleep(random.uniform(1.0, 3.0))
 
+    progress_bar.close()
     return pd.DataFrame(all_data)
 
 
 def process_dataframe(df: DataFrame) -> DataFrame:
+    ic()
     columns_to_keep: list[str] = [
         "vehicleCategory",
         "year",
@@ -132,26 +145,47 @@ async def download_image(session, image_url, file_path) -> None:
                 f.write(chunk)
 
 
+async def create_zip_archive(downloaded_files, output_folder) -> str:
+    ic()
+    zip_file_path: str = os.path.join(DOWNLOADS_DIR, "images.zip")
+
+    if os.path.exists(zip_file_path):
+        os.remove(zip_file_path)
+
+    with zipfile.ZipFile(zip_file_path, "w") as zipf:
+        for file_path in downloaded_files:
+            zipf.write(file_path, arcname=os.path.join(output_folder, os.path.basename(file_path)))
+
+    return os.path.abspath(zip_file_path)
+
+
 async def download_images(images, output_folder=IMAGES_DIR) -> None:
     ic()
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
+    downloaded_files = []
+
     async with aiohttp.ClientSession() as session:
         tasks = []
-        for image_url in images:
+        for image_url in tqdm(images, desc="Скачивание изображений", unit="image"):
             file_name: str = os.path.join(output_folder, f"{image_url.split('/')[-1]}")
+            downloaded_files.append(file_name)
             if not os.path.exists(file_name):
                 tasks.append(download_image(session, image_url, file_name))
 
         await asyncio.gather(*tasks)
+
+    output_archive: str = await create_zip_archive(downloaded_files, PATH_TO_IMAGES)
+
+    print(f"{len(downloaded_files)} изображений добавлены в архив: {output_archive}")
 
 
 def process_images(images) -> list[str]:
     def get_image_url(item):
         return item["hdr"] if item["hdr"] is not None else item["full"]
 
-    return [get_image_url(item) for item in ast.literal_eval(images)]
+    return [get_image_url(item) for item in ast.literal_eval(images.replace(" ", ""))]
 
 
 def process_images_column(output_file_path) -> list[str]:
@@ -167,9 +201,8 @@ def process_images_column(output_file_path) -> list[str]:
     df["images"] = df["images"].apply(process_images)
     all_images: list[str] = [image for sublist in df["images"] for image in sublist]
 
-    path_to_images = "images/"
     df["images"] = df["images"].apply(
-        lambda images: [f"{path_to_images}{os.path.basename(image_url)}" for image_url in images]
+        lambda images: [f"{PATH_TO_IMAGES}/{os.path.basename(image_url)}" for image_url in images]
     )
 
     save_to_file(df, output_file_path)
@@ -178,7 +211,7 @@ def process_images_column(output_file_path) -> list[str]:
 
 
 async def main(pages: int, file_format: str) -> None:
-    ic(pages)
+    ic(pages, file_format)
     output_file: str = f"{OUTPUT_FILE_PATH}.{file_format}"
     driver: WebDriver = initialize_driver()
 
@@ -210,8 +243,11 @@ async def main(pages: int, file_format: str) -> None:
 
         df: DataFrame = fetch_data(driver, filter_params, pages)
         df = process_dataframe(df)
+        df.drop_duplicates(subset="vin", keep="first", inplace=True)
         save_to_file(df, output_file)
         image_list: list[str] = process_images_column(output_file)
+        print(f"{len(df)} позиций сохранено в файле: {os.path.abspath(output_file)}")
+
         await download_images(image_list)
 
     except Exception as e:
