@@ -40,7 +40,7 @@
 2. Перейдите в папку проекта:
 
     ```bash
-    cd autobidmaster_scraper
+    cd autobidmaster_scrapper
     ```
 
 3. Создайте виртуальную среду Python:
