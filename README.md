@@ -1,10 +1,10 @@
-# Scrap 0000 Scrap project name
+# Парсер данных с Autobidmaster
 
-Get data from html and save to JSON, CSV files.
+Парсер получает данные с сайта Autobidmaster по фильтру "Run & Drive" за последние 3 года. Сохраняет данные в `csv` или `xlsx` по выбору, скачиват изображения и архивирует их в `images.zip`.
 
-Used:
+Используемые технологии:
 
-* requests
-* beautifulsoup4
-* json
-* csv
+* aiohttp
+* asyncio
+* pandas
+* selenium
